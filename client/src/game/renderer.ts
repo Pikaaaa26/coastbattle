@@ -209,7 +209,7 @@ export class BoardRenderer {
   }
 
   adjustZoom(factor: number) {
-    this.zoomF = Math.min(3, Math.max(0.7, this.zoomF * factor));
+    this.zoomF = Math.min(6, Math.max(0.7, this.zoomF * factor));
     this.fitCamera();
   }
   // pan by screen pixels — "grab the world" semantics, valid at any camera azimuth

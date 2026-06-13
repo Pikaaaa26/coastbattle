@@ -453,7 +453,7 @@ export default function GameScreen() {
           <button className="btn btn-ghost btn-sm" onClick={leave}>
             ‹ Leave
           </button>
-          {session instanceof LocalSession && (
+          {session instanceof LocalSession && (view.players[viewer]?.isAI || !view.players[viewer]?.alive) && (
             <button
               className={`btn btn-ghost btn-sm ${session.getRevealFog() ? 'on' : ''}`}
               style={{ color: session.getRevealFog() ? 'var(--color-primary)' : '' }}
@@ -465,6 +465,13 @@ export default function GameScreen() {
             </button>
           )}
           <span className="tag">TURN {view.turn}</span>
+          <button className="btn btn-ghost btn-sm help-toggle" onClick={() => setShowHelp((v) => !v)}>
+            ?
+          </button>
+        </div>
+
+        {/* player roster — top-right overlay on both desktop & mobile */}
+        <div className="player-roster">
           {view.turnOrder.map((idx) => {
             const p = view.players[idx];
             const isCurrent = view.currentPlayer === p.index;
@@ -485,9 +492,15 @@ export default function GameScreen() {
               </div>
             );
           })}
-          <button className="btn btn-ghost btn-sm help-toggle" onClick={() => setShowHelp((v) => !v)}>
-            ?
-          </button>
+          {/* compact energy readout — mobile only (desktop shows it in the HUD sidebar) */}
+          <div className="mobile-energy">
+            <div className="me-faction">{view.players[viewer]?.faction?.toUpperCase() ?? 'PLYR'}</div>
+            <div className="me-val">
+              {myEnergy}
+              <small> ⚡</small>
+            </div>
+            <div className="me-income">+{income}/turn</div>
+          </div>
         </div>
 
         <div className="board-wrap">
@@ -585,16 +598,12 @@ export default function GameScreen() {
           <div
             className="canvas-log-overlay"
             style={{
-              position: 'absolute',
-              top: 12,
-              left: 12,
               display: 'flex',
               gap: 8,
               alignItems: 'center',
               background: 'rgba(5, 13, 23, 0.85)',
               border: '2px solid var(--line-bright)',
               padding: '6px 10px',
-              maxWidth: '320px',
               zIndex: 10,
               boxShadow: 'var(--shadow-hard)',
             }}
@@ -759,6 +768,7 @@ function Hud({
   onEndTurn: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<'build' | 'arsenal'>('build');
+  const [drawerOpen, setDrawerOpen] = useState(false); // mobile: collapsible Build/Arsenal drawer
   const selectBuild = useGame((s) => s.selectBuild);
   const selectWeapon = useGame((s) => s.selectWeapon);
   const clearTool = useGame((s) => s.clearTool);
@@ -793,7 +803,7 @@ function Hud({
   const enemyTurn = view.phase === 'playing' && !canAct && !view.winner && view.currentPlayer !== viewer;
 
   return (
-    <div className="hud">
+    <div className={`hud${drawerOpen ? ' drawer-open' : ''}`}>
       <div className="hud-scroll">
         <div className="res-bar">
           <div>
@@ -833,6 +843,17 @@ function Hud({
           <div className="panel" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div className="hud-tabs" style={{ display: 'flex', borderBottom: '2px solid var(--line)', background: 'rgba(0,0,0,0.1)' }}>
               <button
+                className="drawer-chev"
+                aria-label={drawerOpen ? 'Collapse panel' : 'Expand panel'}
+                title={drawerOpen ? 'Collapse' : 'Expand'}
+                onClick={() => {
+                  sfx.click();
+                  setDrawerOpen((o) => !o);
+                }}
+              >
+                {drawerOpen ? '▾' : '▴'}
+              </button>
+              <button
                 className={`hud-tab-btn ${activeTab === 'build' ? 'active' : ''}`}
                 style={{
                   flex: 1,
@@ -850,6 +871,7 @@ function Hud({
                 onClick={() => {
                   sfx.click();
                   setActiveTab('build');
+                  setDrawerOpen(true);
                 }}
               >
                 Build Yard
@@ -872,6 +894,7 @@ function Hud({
                 onClick={() => {
                   sfx.click();
                   setActiveTab('arsenal');
+                  setDrawerOpen(true);
                 }}
               >
                 Arsenal ({weapons.length})
@@ -897,7 +920,10 @@ function Hud({
                               ? 'No room in your territory'
                               : d.desc
                       }
-                      onClick={() => selectBuild(type)}
+                      onClick={() => {
+                        selectBuild(type);
+                        setDrawerOpen(false); // collapse so the board is tappable for placement
+                      }}
                     >
                       <BuildingIcon type={type} size={30} color={view.players[viewer]?.color} />
                       <span className="pal-meta">
@@ -931,7 +957,12 @@ function Hud({
                     <div
                       key={b.id}
                       className={`weapon-row ${sel ? 'sel' : ''} ${!canFire ? 'dis' : ''}`}
-                      onClick={() => canFire && selectWeapon(b.id)}
+                      onClick={() => {
+                        if (canFire) {
+                          selectWeapon(b.id);
+                          setDrawerOpen(false); // collapse so the board is tappable for targeting
+                        }
+                      }}
                     >
                       <BuildingIcon type={b.type} size={26} color={view.players[viewer]?.color} />
                       <div>

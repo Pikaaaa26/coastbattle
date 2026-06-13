@@ -79,6 +79,41 @@
   touch-action: none; /* mobile: board-drag shouldn't trigger pull-to-refresh / double-tap zoom */
 }
 
+/* player roster — floating top-right panel over the board (desktop & mobile) */
+.player-roster {
+  position: absolute;
+  top: 50px;
+  right: 10px;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 46%;
+  pointer-events: none; /* gaps pass clicks through to the board; chips re-enable below */
+}
+.player-roster .pchip {
+  pointer-events: auto;
+  background: rgba(5, 13, 23, 0.82);
+  box-shadow: var(--shadow-hard);
+  white-space: nowrap;
+}
+/* energy card lives in the roster column; shown on mobile only (desktop uses the HUD sidebar) */
+.mobile-energy {
+  display: none;
+}
+/* drawer chevron — only meaningful on the mobile bottom drawer */
+.drawer-chev {
+  display: none;
+}
+/* battle-log preview — position lives here so the mobile layout can move it below the top bar */
+.canvas-log-overlay {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  max-width: 320px;
+}
+
 /* floating confirm / rotate / cancel buttons pinned over the building ghost (mobile aiming).
    Chunky retro pixel buttons: stacked 1-step bevel, sharp corners, square SVG glyphs,
    press-down on tap. DOM order is  ✓ rotate ✕. */
@@ -493,22 +528,132 @@
 }
 
 @media (max-width: 760px) {
+  /* the board fills the whole screen; bars + panels float over it */
   .game-shell {
-    flex-direction: column;
+    position: relative;
+    display: block;
     height: 100%;
     overflow: hidden;
   }
   .board-area {
-    flex: 1.2;
-    min-height: 0;
+    position: absolute;
+    inset: 0;
+    flex: none;
   }
+  /* compact translucent top bar */
+  .board-top {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
+    padding: 6px 8px;
+    gap: 6px;
+    border-bottom: none;
+    flex-wrap: nowrap;
+    background: linear-gradient(180deg, rgba(5, 13, 23, 0.92), rgba(5, 13, 23, 0));
+  }
+  .player-roster {
+    top: 42px;
+    right: 6px;
+    gap: 4px;
+    max-width: 52%;
+  }
+  .player-roster .pchip {
+    font-size: 11px;
+    padding: 3px 6px;
+  }
+  .canvas-log-overlay {
+    top: 48px;
+    left: 6px;
+    max-width: 44%;
+  }
+  /* energy card sits under the roster (right column) */
+  .mobile-energy {
+    display: block;
+    pointer-events: auto;
+    margin-top: 2px;
+    padding: 4px 9px;
+    text-align: right;
+    border: 2px solid var(--line-bright);
+    background: rgba(5, 13, 23, 0.88);
+    box-shadow: var(--shadow-hard);
+  }
+  .mobile-energy .me-faction {
+    font-family: var(--font-display);
+    font-size: 8px;
+    letter-spacing: 0.5px;
+    color: var(--ink-dim);
+  }
+  .mobile-energy .me-val {
+    font-family: var(--font-pixel);
+    font-size: 26px;
+    line-height: 1;
+    color: var(--amber);
+  }
+  .mobile-energy .me-val small {
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+  .mobile-energy .me-income {
+    font-size: 11px;
+    color: var(--green);
+  }
+  /* HUD → collapsible bottom drawer */
   .hud {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
     width: 100%;
-    flex: 1;
-    min-height: 0;
-    max-height: 44%;
+    min-width: 0;
+    height: auto;
+    max-height: 74%;
+    flex: none;
     border-left: none;
-    border-top: 2px solid var(--line);
+    border-top: 2px solid var(--line-bright);
+    box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.55);
+    z-index: 40;
+  }
+  .hud-scroll {
+    flex: none;
+    padding: 0;
+    overflow: visible;
+  }
+  /* energy + phase live in the floating cards on mobile, not the drawer */
+  .hud .res-bar,
+  .hud .phase-line {
+    display: none;
+  }
+  .hud .panel {
+    border: none;
+  }
+  /* collapsed: only the tab row shows; expanded: reveal the palette / arsenal */
+  .hud:not(.drawer-open) .palette,
+  .hud:not(.drawer-open) .col {
+    display: none;
+  }
+  .hud.drawer-open .palette,
+  .hud.drawer-open .col {
+    max-height: 42vh;
+  }
+  /* chevron handle in the tab row */
+  .drawer-chev {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    flex-shrink: 0;
+    border: none;
+    border-right: 1px solid var(--line);
+    background: rgba(0, 0, 0, 0.25);
+    color: var(--amber);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .hud-actions {
+    padding: 8px 10px;
+    gap: 8px;
   }
 }
 
