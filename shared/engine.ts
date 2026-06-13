@@ -214,7 +214,7 @@ export function createGame(
   };
 }
 
-function makeBuilding(
+export function makeBuilding(
   type: BuildingType,
   owner: number,
   x: number,
@@ -585,6 +585,9 @@ function onBuildingDestroyed(s: GameState, b: Building, events: GameEvent[]) {
     cells: b.cells.map((c) => ({ x: c.x, y: c.y })),
   });
   refreshDisabled(s); // Update disabled states immediately (e.g. power plants if base is destroyed)
+  // losing the Research Station disables the owner's shield gens — their coverage must drop too
+  // (otherwise already-applied cell shields keep absorbing). Also covers destroying a gen directly.
+  recomputeShields(s, b.owner);
   if (b.type === 'base') {
     const anyBase = s.buildings.some((o) => o.owner === b.owner && o.type === 'base' && !o.destroyed);
     if (!anyBase) {

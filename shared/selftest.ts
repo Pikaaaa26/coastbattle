@@ -2,7 +2,7 @@
 // Run with: npm run engine:test
 import { generateMap, ARCHETYPES, ARCHETYPE_NAMES } from './map';
 import { createGame } from './engine';
-import { applyAction, serializeForPlayer } from './engine';
+import { applyAction, serializeForPlayer, makeBuilding } from './engine';
 import { decideDeploy, decideTurn, newAiMemory } from './ai';
 import type { GameSettings, GameState, MapArchetype } from './types';
 import { TURN_CAP } from './constants';
@@ -166,6 +166,7 @@ function simulate(seed: number, arch: MapArchetype, np: number, verbose = false)
   const mem = seeds.map(() => newAiMemory());
   let safety = 0;
   let actionErrors = 0;
+  let shieldLeak = false;
   while (state.phase === 'playing' && safety++ < 5000) {
     const ai = state.currentPlayer;
     const plan = decideTurn(state, ai, mem[ai]);
@@ -175,7 +176,21 @@ function simulate(seed: number, arch: MapArchetype, np: number, verbose = false)
       else state = r.state;
       if (state.phase === 'ended') break;
     }
+    // invariant: a cell may only hold a shield while its owner has a live, ENABLED shield generator.
+    // Destroying the Research Station disables the gens, so their coverage must drop the same turn.
+    for (const p of state.players) {
+      const hasReadyGen = state.buildings.some(
+        (b) => b.owner === p.index && b.type === 'shield' && !b.destroyed && !b.disabled && state.turn >= b.operationalTurn,
+      );
+      if (
+        !hasReadyGen &&
+        state.buildings.some((b) => b.owner === p.index && !b.destroyed && b.cells.some((c) => !c.destroyed && c.shield > 0))
+      ) {
+        shieldLeak = true;
+      }
+    }
   }
+  check(!shieldLeak, `sim seed=${seed} ${arch} x${np}: shields never linger without a live shield generator`);
   if (verbose) {
     console.log(`    ended at turn ${state.turn}, winner=${state.winner != null ? state.players[state.winner].name : 'draw'}, actionErrors=${actionErrors}`);
     console.log(`    buildings: ${state.buildings.filter((b) => !b.destroyed).length} alive / ${state.buildings.length} total`);
@@ -230,6 +245,89 @@ console.log('\n=== FOG OF WAR ===');
       spec.buildings.length === state.buildings.length && spec.settings.fogOfWar === false,
       'spectator: eliminated viewer sees all buildings (fog off)',
     );
+  }
+}
+
+console.log('\n=== RESEARCH LOSS → ADVANCED OFFLINE + SHIELDS DROP ===');
+{
+  const settings: GameSettings = {
+    numPlayers: 2,
+    mode: 'ffa',
+    turnCap: TURN_CAP,
+    fogOfWar: false,
+    mapArchetype: 'twin',
+    difficulty: 'hard',
+  };
+  const state = createGame(settings, 123, [
+    { id: 'p0', name: 'Defender', isAI: true },
+    { id: 'p1', name: 'Attacker', isAI: true },
+  ]);
+  const W = state.map.width;
+  const t = state.map.territory;
+  // a 2x2 block fully inside player 0's territory → legal artillery target + research footprint
+  let rx = -1;
+  let ry = -1;
+  for (let y = 0; y < state.map.height - 1 && rx < 0; y++) {
+    for (let x = 0; x < W - 1; x++) {
+      const i = y * W + x;
+      if (t[i] === 0 && t[i + 1] === 0 && t[i + W] === 0 && t[i + W + 1] === 0) {
+        rx = x;
+        ry = y;
+        break;
+      }
+    }
+  }
+  const p0far: { x: number; y: number }[] = [];
+  const p1cells: { x: number; y: number }[] = [];
+  for (let i = 0; i < t.length; i++) {
+    const x = i % W;
+    const y = Math.floor(i / W);
+    if (t[i] === 0 && Math.abs(x - rx) + Math.abs(y - ry) > 3) p0far.push({ x, y }); // clear of the blast
+    if (t[i] === 1) p1cells.push({ x, y });
+  }
+  check(rx >= 0 && p0far.length >= 3 && p1cells.length >= 2, 'research-test: scenario cells available');
+
+  if (rx >= 0 && p0far.length >= 3 && p1cells.length >= 2) {
+    state.phase = 'playing';
+    state.turn = 5;
+    state.round = 2;
+    state.currentPlayer = 1;
+    state.players[1].energy = 99;
+
+    const research = makeBuilding('research', 0, rx, ry, 0);
+    for (const c of research.cells) {
+      c.hp = 1;
+      c.maxHp = 1; // a single artillery volley flattens it
+    }
+    research.disabled = false;
+    const gen = makeBuilding('shield', 0, p0far[0].x, p0far[0].y, 0);
+    gen.disabled = false; // online while research stands
+    const guarded = makeBuilding('silo', 0, p0far[1].x, p0far[1].y, 0);
+    for (const c of guarded.cells) c.shield = 1; // shields currently up
+    const base0 = makeBuilding('base', 0, p0far[2].x, p0far[2].y, 0);
+    const base1 = makeBuilding('base', 1, p1cells[0].x, p1cells[0].y, 0);
+    const arty = makeBuilding('artillery', 1, p1cells[1].x, p1cells[1].y, 0);
+    arty.operationalTurn = 0;
+    state.buildings.push(research, gen, guarded, base0, base1, arty);
+
+    check(
+      guarded.cells.every((c) => c.shield === 1) && !gen.disabled,
+      'research-test: shields up + generator online before the strike',
+    );
+
+    const r = applyAction(state, 'p1', { type: 'fire', buildingId: arty.id, x: rx, y: ry, rot: 0 });
+    check(r.ok, `research-test: artillery strike accepted${r.ok ? '' : ' — ' + r.error}`);
+    if (r.ok) {
+      const research2 = r.state.buildings.find((b) => b.id === research.id)!;
+      const gen2 = r.state.buildings.find((b) => b.id === gen.id)!;
+      const guarded2 = r.state.buildings.find((b) => b.id === guarded.id)!;
+      check(research2.destroyed, 'research-test: research station destroyed');
+      check(gen2.disabled, 'research-test: shield generator goes offline when research is lost');
+      check(
+        guarded2.cells.every((c) => c.shield === 0),
+        'research-test: shield coverage drops the same turn the research dies',
+      );
+    }
   }
 }
 

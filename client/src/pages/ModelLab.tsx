@@ -338,6 +338,17 @@ function chebToBuilding(b: Building, x: number, y: number): number {
 }
 
 function applyLabSystems(state: GameState) {
+  // mirror the engine: research-gated buildings (shield/turret/radar/sonar/repair/jammer/nuclear) go
+  // OFFLINE without a living Research Station, and power plants without a base. So destroying the
+  // research disables those buildings — and their shield coverage drops the same step.
+  for (const b of state.buildings) {
+    if (b.destroyed) continue;
+    const def = BUILDINGS[b.type];
+    const hasResearch = state.buildings.some((o) => o.owner === b.owner && o.type === 'research' && !o.destroyed);
+    const hasBase = state.buildings.some((o) => o.owner === b.owner && o.type === 'base' && !o.destroyed);
+    b.disabled = (!!def.requiresResearch && !hasResearch) || (b.type === 'powerplant' && !hasBase);
+  }
+  // reset, then recompute shield coverage from ONLINE generators only
   for (const b of state.buildings) {
     for (const cell of b.cells) cell.shield = 0;
   }
@@ -653,6 +664,44 @@ export default function ModelLab() {
     setLastResult(`${labMapLabel(mapId)} reset. All models restored.`);
   };
 
+  // The lab is one-directional (you strike the enemy), so the *defensive* sonar aura — your own
+  // territory lighting up purple when an enemy scans you — never triggers on its own. This toggles a
+  // simulated enemy sonar sweep over your base so you can see that aura (drives `visibleToEnemy`).
+  const enemyScanActive = truth.players[1].revealed.length > 0;
+  const toggleEnemyScan = () => {
+    sfx.click();
+    const next = structuredClone(truth) as GameState;
+    if (enemyScanActive) {
+      next.players[1].revealed = [];
+      setTruth(next);
+      setLastResult('Enemy sonar cleared — your territory is dark again.');
+      return;
+    }
+    const base = next.buildings.find((b) => b.owner === 0 && b.type === 'base' && !b.destroyed);
+    const cx = base ? base.x : 6;
+    const cy = base ? base.y : 6;
+    let count = 0;
+    for (let dy = -2; dy <= 3; dy++) {
+      for (let dx = -2; dx <= 3; dx++) {
+        const x = cx + dx;
+        const y = cy + dy;
+        if (!inBounds(next, x, y)) continue;
+        const ci = cellIndex(next.map.width, x, y);
+        if (next.map.territory[ci] !== 0) continue; // only YOUR territory can be exposed to you
+        if (!next.players[1].revealed.includes(ci)) {
+          next.players[1].revealed.push(ci);
+          count++;
+        }
+      }
+    }
+    next.log = [
+      ...next.log.slice(-18),
+      { turn: next.turn, player: -1, text: `⚠ Enemy sonar swept your base — ${count} cell(s) exposed.`, kind: 'threat' },
+    ];
+    setTruth(next);
+    setLastResult(`Enemy sonar swept your base — ${count} cell(s) exposed (watch the purple aura on your side).`);
+  };
+
   return (
     <div className="model-lab">
       <section className="lab-stage">
@@ -728,6 +777,14 @@ export default function ModelLab() {
             </button>
             <button className="btn btn-sm" onClick={() => rendererRef.current?.resetCamera()}>
               Reset Camera
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={toggleEnemyScan}
+              title="Simulate an enemy sonar sweeping your base, to preview the defensive purple aura"
+              style={enemyScanActive ? { borderColor: 'var(--magenta)', color: 'var(--magenta)' } : undefined}
+            >
+              {enemyScanActive ? 'Clear Enemy Sonar' : 'Sim Enemy Sonar'}
             </button>
             <button className="btn btn-sm btn-primary" onClick={resetLab}>
               Reset Lab

@@ -99,6 +99,8 @@ export class BoardRenderer {
   private decoG = new THREE.Group();
   private buildingsG = new THREE.Group();
   private fogG = new THREE.Group();
+  // purple tiles marking enemy/neutral cells our sonar/radar currently exposes (pulsed each frame)
+  private sonarTiles: THREE.Mesh[] = [];
   private markerG = new THREE.Group();
   private uiG = new THREE.Group();
   private ghostG = new THREE.Group();
@@ -633,35 +635,58 @@ export class BoardRenderer {
     if (!v.settings.fogOfWar) {
       if (this.fogKey !== 'off' && this.fogHiddenPrev.size) this.spawnFogRevealRipple([...this.fogHiddenPrev]);
       clearGroup(this.fogG);
+      this.sonarTiles = [];
       this.fogKey = 'off';
       this.fogHiddenPrev = new Set();
       return;
     }
     const revealed = new Set(v.players[this.viewer]?.revealed ?? []);
+    // cells to wash in a faint pulsing purple "sonar aura":
+    //  - enemy/neutral ground WE have scanned (offensive footprint), and
+    //  - OUR OWN cells an enemy has scanned (defensive — tells us our territory is exposed)
+    const exposed = new Set<number>();
+    for (const i of revealed) if (v.map.territory[i] !== this.viewer) exposed.add(i);
+    for (const i of v.visibleToEnemy ?? []) exposed.add(i);
     // eliminated commanders' fields lose their fog — no point shelling the dead
     const ownerDead = (i: number) => {
       const o = v.map.territory[i];
       return o >= 0 && !!v.players[o] && !v.players[o].alive;
     };
     const lit = (i: number) => v.map.territory[i] === this.viewer || revealed.has(i) || ownerDead(i);
-    const key = `${this.viewer}|${[...revealed].sort().join(',')}|${v.map.territory.join('')}|${v.players
-      .map((p) => (p.alive ? 1 : 0))
-      .join('')}`;
+    const key = `${this.viewer}|${[...revealed].sort().join(',')}|${[...exposed].sort().join(',')}|${v.map.territory.join(
+      '',
+    )}|${v.players.map((p) => (p.alive ? 1 : 0)).join('')}`;
     if (key === this.fogKey) return;
     this.fogKey = key;
     clearGroup(this.fogG);
+    this.sonarTiles = [];
     const hidden = new Set<number>();
     for (let gy = 0; gy < this.H; gy++)
       for (let gx = 0; gx < this.W; gx++) {
         const i = gy * this.W + gx;
-        if (lit(i)) continue;
-        hidden.add(i);
-        const cap = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat('#04101c', { opacity: 0.42 }));
-        cap.rotation.x = -Math.PI / 2;
-        cap.position.set(this.wx(gx), this.topOf(gx, gy) + 0.05, this.wz(gy));
-        cap.castShadow = false;
-        cap.receiveShadow = false;
-        this.fogG.add(cap);
+        if (!lit(i)) {
+          hidden.add(i);
+          const cap = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat('#04101c', { opacity: 0.42 }));
+          cap.rotation.x = -Math.PI / 2;
+          cap.position.set(this.wx(gx), this.topOf(gx, gy) + 0.05, this.wz(gy));
+          cap.castShadow = false;
+          cap.receiveShadow = false;
+          this.fogG.add(cap);
+          continue;
+        }
+        // faint pulsing purple aura over any sonar/radar-exposed ground (offensive + defensive)
+        if (exposed.has(i)) {
+          const hl = new THREE.Mesh(
+            new THREE.PlaneGeometry(1, 1),
+            mat('#d36bff', { opacity: 0.2, emissive: '#b030e0' }),
+          );
+          hl.rotation.x = -Math.PI / 2;
+          hl.position.set(this.wx(gx), this.topOf(gx, gy) + 0.06, this.wz(gy));
+          hl.castShadow = false;
+          hl.receiveShadow = false;
+          this.fogG.add(hl);
+          this.sonarTiles.push(hl);
+        }
       }
     const newlyVisible = [...this.fogHiddenPrev].filter((i) => !hidden.has(i));
     this.spawnFogRevealRipple(newlyVisible);
@@ -734,54 +759,7 @@ export class BoardRenderer {
       this.craterSeen = visible;
     }
 
-    if (v.visibleToEnemy) {
-      for (const idx of v.visibleToEnemy) {
-        const gx = idx % this.W;
-        const gy = Math.floor(idx / this.W);
-        
-        // Semi-transparent orange highlight overlay
-        const overlay = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.94, 0.94),
-          new THREE.MeshBasicMaterial({
-            color: '#ff7700',
-            transparent: true,
-            opacity: 0.25,
-            depthWrite: false,
-            side: THREE.DoubleSide
-          })
-        );
-        overlay.rotation.x = -Math.PI / 2;
-        overlay.position.set(this.wx(gx), this.topOf(gx, gy) + 0.015, this.wz(gy));
-        overlay.userData.disposeMaterial = true;
-        this.markerG.add(overlay);
-
-        // Dotted orange warning border
-        const outlineGeom = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(-0.47, 0, -0.47),
-          new THREE.Vector3(0.47, 0, -0.47),
-          new THREE.Vector3(0.47, 0, -0.47),
-          new THREE.Vector3(0.47, 0, 0.47),
-          new THREE.Vector3(0.47, 0, 0.47),
-          new THREE.Vector3(-0.47, 0, 0.47),
-          new THREE.Vector3(-0.47, 0, 0.47),
-          new THREE.Vector3(-0.47, 0, -0.47)
-        ]);
-        
-        const lineMat = new THREE.LineDashedMaterial({
-          color: '#ff5500',
-          dashSize: 0.1,
-          gapSize: 0.05,
-          scale: 1,
-          linewidth: 2,
-        });
-        
-        const line = new THREE.LineSegments(outlineGeom, lineMat);
-        line.computeLineDistances();
-        line.position.set(this.wx(gx), this.topOf(gx, gy) + 0.017, this.wz(gy));
-        line.userData.disposeMaterial = true;
-        this.markerG.add(line);
-      }
-    }
+    // cells exposed to the enemy are shown by the pulsing purple aura in refreshFog (no grid here)
   }
 
   // ---------- interaction (valid cells, ghost, footprints) ----------
@@ -1366,6 +1344,13 @@ export class BoardRenderer {
       k.obj.rotation.z = k.baseRotZ;
       return false;
     });
+    // pulse the purple sonar aura so the exposed area reads as "live"
+    if (this.sonarTiles.length) {
+      const sp = 0.5 + 0.5 * Math.sin(this.time * 2.2);
+      for (const t of this.sonarTiles) {
+        (t.material as THREE.MeshStandardMaterial).opacity = 0.1 + sp * 0.2;
+      }
+    }
     // water bob
     for (const w of this.waterMeshes) {
       const ph = (w.userData.water as { phase: number }).phase;

@@ -368,7 +368,9 @@
 
 /* ===================== Overlays ===================== */
 .overlay {
-  position: absolute;
+  /* fixed (not absolute) so modals center in the VIEWPORT — on mobile the game-screen is taller
+     than the screen, and an absolute overlay would center the card (and its ✕) off-screen. */
+  position: fixed;
   inset: 0;
   z-index: 200;
   display: flex;
