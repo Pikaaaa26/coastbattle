@@ -1,0 +1,43 @@
+{
+  "name": "coast-battle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Coast Battle — retro naval base-building war game on a shared archipelago.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch server/index.ts",
+    "dev:client": "vite --config client/vite.config.ts",
+    "build": "vite build --config client/vite.config.ts",
+    "preview": "vite preview --config client/vite.config.ts",
+    "start": "tsx server/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "engine:test": "tsx shared/selftest.ts"
+  },
+  "dependencies": {
+    "@types/three": "^0.184.1",
+    "express": "^4.21.2",
+    "nanoid": "^5.0.9",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.1",
+    "three": "^0.184.0",
+    "tsx": "^4.19.2",
+    "ws": "^8.18.0",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  }
+}

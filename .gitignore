@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.log
+.env
+.env.local
+.DS_Store
+.vite/
+client/dist/
+coverage/
+*.tsbuildinfo
+# runtime data (regenerated; not source)
+battle_logs/
+ratings.json
+# local tooling / editor
+.claude/
+.gemini/
+.deploytest/

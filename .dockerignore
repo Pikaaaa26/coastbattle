@@ -1,0 +1,11 @@
+node_modules
+dist
+battle_logs
+ratings.json
+.git
+.gitignore
+.claude
+.gemini
+Dockerfile
+.dockerignore
+README.md

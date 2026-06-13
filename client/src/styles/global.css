@@ -1,0 +1,345 @@
+/* ===================== Coast Battle — retro command-console theme ===================== */
+:root {
+  --bg: #050d17;
+  --bg2: #081627;
+  --sea: #0e2740;
+  --sea-deep: #0a1c30;
+  --sea-light: #16395c;
+  --panel: #0b1f33;
+  --panel2: #0e2843;
+  --line: #1d4a6e;
+  --line-bright: #2f6f9f;
+  --ink: #d7ecff;
+  --ink-dim: #6f93b3;
+  --ink-faint: #3d6080;
+  --amber: #ffcf4d;
+  --gold: #ffb347;
+  --green: #52e0a0;
+  --red: #ff5a5a;
+  --teal: #3fb6ff;
+  --magenta: #d36bff;
+
+  --font-display: 'Press Start 2P', 'Courier New', monospace;
+  --font-mono: 'Share Tech Mono', 'Courier New', monospace;
+  --font-pixel: 'VT323', 'Courier New', monospace;
+
+  --shadow-hard: 0 4px 0 rgba(0, 0, 0, 0.5);
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background:
+    radial-gradient(1200px 700px at 50% -10%, #103050 0%, transparent 60%),
+    linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  -webkit-font-smoothing: none;
+  image-rendering: pixelated;
+  overflow-x: hidden;
+  letter-spacing: 0.02em;
+}
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+h1,
+h2,
+h3,
+.display {
+  font-family: var(--font-display);
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+a {
+  color: var(--teal);
+  text-decoration: none;
+}
+
+::selection {
+  background: var(--amber);
+  color: #000;
+}
+
+/* ---- scrollbars ---- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border: 2px solid var(--bg);
+}
+
+/* ===================== CRT overlay ===================== */
+.crt-overlay {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  mix-blend-mode: overlay;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+body.crt .crt-overlay {
+  opacity: 1;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.16) 0px,
+      rgba(0, 0, 0, 0.16) 1px,
+      transparent 2px,
+      transparent 3px
+    );
+}
+body.crt .crt-vignette {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9001;
+  box-shadow: inset 0 0 220px rgba(0, 0, 0, 0.75);
+  background: radial-gradient(120% 120% at 50% 50%, transparent 60%, rgba(0, 0, 0, 0.35) 100%);
+}
+
+/* ===================== Buttons ===================== */
+.btn {
+  font-family: var(--font-display);
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--panel2);
+  border: 2px solid var(--line-bright);
+  padding: 12px 16px;
+  cursor: pointer;
+  box-shadow: var(--shadow-hard);
+  transition:
+    transform 0.05s,
+    background 0.1s,
+    box-shadow 0.05s;
+  position: relative;
+  user-select: none;
+}
+.btn:hover {
+  background: #12365a;
+  border-color: var(--teal);
+}
+.btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+}
+.btn-primary {
+  color: #06121f;
+  background: var(--amber);
+  border-color: #fff2c4;
+  text-shadow: none;
+}
+.btn-primary:hover {
+  background: var(--gold);
+}
+.btn-danger {
+  border-color: var(--red);
+  color: var(--red);
+}
+.btn-ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink-dim);
+  box-shadow: none;
+}
+.btn-ghost:hover {
+  color: var(--ink);
+  border-color: var(--line-bright);
+}
+.btn-sm {
+  font-size: 9px;
+  padding: 8px 10px;
+}
+
+/* ===================== Panels ===================== */
+.panel {
+  background: linear-gradient(180deg, rgba(14, 40, 67, 0.9), rgba(11, 31, 51, 0.9));
+  border: 2px solid var(--line);
+  position: relative;
+}
+.panel-head {
+  font-family: var(--font-display);
+  font-size: 10px;
+  color: var(--amber);
+  padding: 8px 10px;
+  border-bottom: 2px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--line-bright);
+  color: var(--ink-dim);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* ===================== Layout shell ===================== */
+.shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.topnav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  border-bottom: 2px solid var(--line);
+  background: rgba(5, 13, 23, 0.6);
+  backdrop-filter: blur(2px);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.brand {
+  font-family: var(--font-display);
+  font-size: 16px;
+  color: var(--amber);
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  text-shadow: 2px 2px 0 #5a3d00;
+}
+.brand .tide {
+  color: var(--teal);
+}
+.nav-links {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.icon-toggle {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.icon-toggle.on {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ===================== utility ===================== */
+.row {
+  display: flex;
+  gap: 10px;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.center {
+  align-items: center;
+  justify-content: center;
+}
+.wrap {
+  flex-wrap: wrap;
+}
+.muted {
+  color: var(--ink-dim);
+}
+.faint {
+  color: var(--ink-faint);
+}
+.amber {
+  color: var(--amber);
+}
+.green {
+  color: var(--green);
+}
+.red {
+  color: var(--red);
+}
+.teal {
+  color: var(--teal);
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.pixel {
+  font-family: var(--font-pixel);
+}
+.blink {
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+.scan-line {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+  opacity: 0.6;
+}
+
+@media (max-width: 480px) {
+  .topnav {
+    padding: 8px 10px;
+  }
+  .brand {
+    font-size: 14px;
+  }
+  .nav-links {
+    gap: 4px;
+  }
+  .btn-sm {
+    font-size: 8px;
+    padding: 6px 8px;
+  }
+  .icon-toggle {
+    font-size: 10px;
+    padding: 5px 6px;
+  }
+}
+
+@media (max-width: 400px) {
+  .brand .tide {
+    display: none;
+  }
+}

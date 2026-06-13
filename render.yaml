@@ -1,0 +1,25 @@
+# Render blueprint — Coast Battle as a single Docker web service.
+# Serves the built client (dist/) AND the WebSocket game server on /ws, on one port.
+# Deploy: push to a Git repo, then on Render → "New +" → "Blueprint" and point it at this file.
+services:
+  - type: web
+    name: coast-battle
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free # bump to "starter" if you want a persistent disk (see the disk block below)
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render injects PORT automatically; the server reads process.env.PORT — do not hardcode it.
+      #
+      # --- OPTIONAL: persist the ELO leaderboard + battle logs across deploys ---
+      # Render's filesystem is ephemeral on the free plan. To keep ratings.json between deploys,
+      # switch plan to "starter" (or higher), uncomment the disk + DATA_DIR below, and redeploy.
+      # - key: DATA_DIR
+      #   value: /var/data
+    # disk:
+    #   name: coast-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
