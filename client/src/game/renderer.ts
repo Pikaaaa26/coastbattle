@@ -226,11 +226,24 @@ export class BoardRenderer {
   rotateCamera(dir: 1 | -1) {
     this.azTarget += (Math.PI / 2) * dir;
   }
+  // continuous rotation (for 3-finger touch drag)
+  rotateCameraBy(deltaRad: number) {
+    this.azTarget += deltaRad;
+  }
   resetCamera() {
     this.zoomF = 1;
     this.panOff.set(0, 0, 0);
     this.azTarget = Math.PI / 4;
     this.fitCamera();
+  }
+
+  // project a grid cell to CSS-pixel coords relative to the canvas (for floating UI like confirm buttons)
+  cellToScreen(gx: number, gy: number): { x: number; y: number } | null {
+    const v = new THREE.Vector3(this.wx(gx), LAND_TOP + 0.7, this.wz(gy));
+    v.project(this.camera);
+    if (v.z > 1) return null; // behind the camera
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: (v.x * 0.5 + 0.5) * rect.width, y: (-v.y * 0.5 + 0.5) * rect.height };
   }
 
   cellAt(clientX: number, clientY: number): Vec | null {

@@ -79,6 +79,95 @@
   touch-action: none; /* mobile: board-drag shouldn't trigger pull-to-refresh / double-tap zoom */
 }
 
+/* floating confirm / rotate / cancel buttons pinned over the building ghost (mobile aiming).
+   Chunky retro pixel buttons: stacked 1-step bevel, sharp corners, square SVG glyphs,
+   press-down on tap. DOM order is  ✓ rotate ✕. */
+.floating-confirm {
+  position: absolute;
+  z-index: 60;
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  pointer-events: none; /* gaps between buttons don't block board taps */
+  transform: translate(-50%, -150%);
+  image-rendering: pixelated;
+}
+.floating-confirm .fc-btn {
+  pointer-events: auto;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid;
+  border-radius: 0; /* hard pixel corners */
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  /* stacked pixel bevel — light top-left, dark bottom-right inset, then a hard drop shadow */
+  box-shadow:
+    inset 3px 3px 0 rgba(255, 255, 255, 0.25),
+    inset -3px -3px 0 rgba(0, 0, 0, 0.34),
+    var(--shadow-hard);
+  transition:
+    transform 0.04s,
+    box-shadow 0.04s;
+}
+.floating-confirm .fc-btn:active {
+  transform: translateY(3px);
+  /* pressed — invert the bevel and flatten the drop shadow */
+  box-shadow:
+    inset 3px 3px 0 rgba(0, 0, 0, 0.34),
+    0 1px 0 rgba(0, 0, 0, 0.5);
+}
+.floating-confirm .fc-ico {
+  display: block;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+}
+/* primary confirm — bright solid green + pulse so the action is unmistakable */
+.floating-confirm .fc-yes {
+  background: var(--green);
+  border-color: #d6fff0;
+  color: #05241a;
+  animation: fcPulse 1.4s ease-in-out infinite;
+}
+.floating-confirm .fc-yes:active {
+  animation: none;
+}
+/* rotate — teal utility, only rendered for non-square footprints */
+.floating-confirm .fc-rot {
+  background: var(--panel2);
+  border-color: var(--teal);
+  color: var(--teal);
+}
+/* secondary cancel — dark square with red glyph */
+.floating-confirm .fc-no {
+  background: #2a0f0f;
+  border-color: var(--red);
+  color: var(--red);
+}
+/* pulse keeps the bevel constant and adds an outer glow ring */
+@keyframes fcPulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 3px 3px 0 rgba(255, 255, 255, 0.25),
+      inset -3px -3px 0 rgba(0, 0, 0, 0.34),
+      var(--shadow-hard);
+  }
+  50% {
+    box-shadow:
+      inset 3px 3px 0 rgba(255, 255, 255, 0.25),
+      inset -3px -3px 0 rgba(0, 0, 0, 0.34),
+      0 4px 0 rgba(0, 0, 0, 0.5),
+      0 0 16px rgba(82, 224, 160, 0.85);
+  }
+}
+
 .hud {
   width: 320px;
   min-width: 280px;
@@ -237,6 +326,17 @@
 }
 .log .le.nuke {
   color: var(--red);
+}
+.log .le.threat {
+  color: #ff3b3b;
+  font-weight: bold;
+  text-shadow: 0 0 6px rgba(255, 59, 59, 0.6);
+  animation: threatPulse 1s ease-in-out infinite;
+}
+@keyframes threatPulse {
+  50% {
+    opacity: 0.55;
+  }
 }
 .log .le.build {
   color: var(--teal);

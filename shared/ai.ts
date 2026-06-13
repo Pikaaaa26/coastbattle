@@ -36,6 +36,13 @@ export interface AiWeights {
   knownRadarVal: number;
   energyReserve: number;
 
+  // --- nuclear-threat response (read from the public battle-log alert; tuned by ML) ---
+  nukeThreatFocus: number; // bonus to every cell in a nuke-builder's territory (focus fire on them)
+  knownNukeVal: number; // value of a DETECTED enemy nuclear facility (destroy it)
+  knownResearchVal: number; // value of a DETECTED enemy research station (cripple their tech)
+  nukeReserveBonus: number; // extra energy to bank for an emergency base rebuild while threatened
+  nukeDenyVal: number; // bonus to open enemy cells that could host a 3×2 (crater them to deny nukes)
+
   wBase_economy: number;
   wEnergy_economy: number;
   wEnergyGen_economy: number;
@@ -67,6 +74,12 @@ export const DEFAULT_AI_WEIGHTS: AiWeights = {
   knownRadarVal: 80,
   energyReserve: 6,
 
+  nukeThreatFocus: 10,
+  knownNukeVal: 200,
+  knownResearchVal: 110,
+  nukeReserveBonus: 4,
+  nukeDenyVal: 6,
+
   wBase_economy: 15,
   wEnergy_economy: -0.2,
   wEnergyGen_economy: -1.0,
@@ -87,6 +100,9 @@ export const DEFAULT_AI_WEIGHTS: AiWeights = {
   wEnergyGen_military: 0.5,
   wBaseHp_military: 0,
 };
+
+// merge the trained weights over defaults so any missing key (e.g. an older weights file) is safe
+const OPTIMIZED_WEIGHTS: AiWeights = { ...DEFAULT_AI_WEIGHTS, ...(OPTIMIZED_AI_WEIGHTS as Partial<AiWeights>) };
 
 function pushUniq(arr: number[], v: number) {
   if (!arr.includes(v)) arr.push(v);
@@ -185,6 +201,58 @@ function hasResearch(s: GameState, owner: number): boolean {
   return count(s, owner, 'research') > 0;
 }
 
+// extra targeting context derived from the public nuke-build alert in the battle log
+interface TargetCtx {
+  threats: Set<number>; // alive enemy commanders who have built a nuclear facility
+  denyMap: Map<number, number>; // cell -> # of open 3×2/2×3 nuke footprints covering it (threat territory)
+}
+
+// Read the PUBLIC battle log for nuclear-facility construction alerts (engine kind 'threat').
+// This is legitimate intel — the alert is broadcast to everyone; it reveals WHO, not WHERE.
+function nukeThreatSet(s: GameState, ai: number): Set<number> {
+  const out = new Set<number>();
+  for (const e of s.log) {
+    if (e.kind === 'threat' && e.player >= 0 && e.player !== ai && s.players[e.player]?.alive) out.add(e.player);
+  }
+  return out;
+}
+
+// For each threat-owned land cell, count how many empty 3×2/2×3 (nuke-sized) footprints cover it.
+// Cratering high-coverage cells removes the most ways the enemy could (re)build a nuclear facility.
+function computeDenyMap(s: GameState, threats: Set<number>): Map<number, number> {
+  const map = new Map<number, number>();
+  if (!threats.size) return map;
+  const W = s.map.width;
+  const H = s.map.height;
+  const occupied = new Set<number>();
+  for (const b of s.buildings) if (!b.destroyed) for (const c of b.cells) if (!c.destroyed) occupied.add(c.y * W + c.x);
+  const buildable = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    const i = y * W + x;
+    if (terrainAt(s, x, y) !== 'land') return false;
+    if (!threats.has(s.map.territory[i])) return false;
+    if (occupied.has(i)) return false;
+    if ((s.blockedUntil?.[i] ?? 0) > s.turn) return false;
+    return true;
+  };
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      for (const [fw, fh] of [
+        [3, 2],
+        [2, 3],
+      ]) {
+        let ok = true;
+        for (let dy = 0; dy < fh && ok; dy++) for (let dx = 0; dx < fw; dx++) if (!buildable(x + dx, y + dy)) { ok = false; break; }
+        if (ok) for (let dy = 0; dy < fh; dy++) for (let dx = 0; dx < fw; dx++) {
+          const i = (y + dy) * W + (x + dx);
+          map.set(i, (map.get(i) || 0) + 1);
+        }
+      }
+    }
+  }
+  return map;
+}
+
 export function decideTurn(state: GameState, ai: number, memory: AiMemory, weights?: AiWeights): Action[] {
   const plan: Action[] = [];
   let w: GameState = structuredClone(state);
@@ -197,7 +265,12 @@ export function decideTurn(state: GameState, ai: number, memory: AiMemory, weigh
   const fireProb = difficulty === 'easy' ? 0.55 : difficulty === 'normal' ? 0.9 : 1;
   const maxBuilds = difficulty === 'easy' ? 1 : difficulty === 'normal' ? 3 : 24;
 
-  const actualWeights = weights ?? (difficulty === 'hard' ? OPTIMIZED_AI_WEIGHTS : DEFAULT_AI_WEIGHTS);
+  const actualWeights = weights ?? (difficulty === 'hard' ? OPTIMIZED_WEIGHTS : DEFAULT_AI_WEIGHTS);
+
+  // who is building nukes? (public log alert) — drives focus-fire, denial, and a rebuild reserve
+  const threats = nukeThreatSet(state, ai);
+  const baseCostRef = buildingDef('base').cost;
+  const rebuildReserve = threats.size ? baseCostRef + actualWeights.nukeReserveBonus : 0;
 
   let lastEvents: GameEvent[] = [];
   const apply = (a: Action): boolean => {
@@ -319,6 +392,11 @@ export function decideTurn(state: GameState, ai: number, memory: AiMemory, weigh
       // Cannot afford target -> PASS
       break;
     }
+    // under a nuke threat, bank enough energy to instantly rebuild the base if we get hit
+    // (economy/base are always allowed; everything else respects the reserve)
+    if (rebuildReserve > 0 && targetType !== 'base' && targetType !== 'powerplant' && energy - def.cost < rebuildReserve) {
+      break;
+    }
 
     const spots0 = validPlacements(w, ai, targetType, 0).map(s => ({ ...s, rot: 0 as 0 | 1 }));
     const spots1 = canRotate(targetType) ? validPlacements(w, ai, targetType, 1).map(s => ({ ...s, rot: 1 as 0 | 1 })) : [];
@@ -352,10 +430,13 @@ export function decideTurn(state: GameState, ai: number, memory: AiMemory, weigh
     }
   }
 
+  // targeting context for scan + fire (focus the nuke-builder, deny their 3×2 sites)
+  const ctx: TargetCtx = { threats, denyMap: computeDenyMap(w, threats) };
+
   // ---- SONAR (scout) ----
   for (const son of w.buildings.filter((b) => b.owner === ai && b.type === 'sonar' && !b.destroyed && !b.disabled && b.cooldownLeft === 0 && w.turn >= b.operationalTurn)) {
     void son;
-    const target = bestScanAnchor(w, ai, memory, 3, actualWeights);
+    const target = bestScanAnchor(w, ai, memory, 3, actualWeights, ctx);
     if (target) apply({ type: 'sonar', buildingId: son.id, x: target.x, y: target.y });
   }
 
@@ -383,7 +464,7 @@ export function decideTurn(state: GameState, ai: number, memory: AiMemory, weigh
     const ah = def.attackH ?? 1;
     void aw;
     void ah;
-    const target = chooseTarget(w, know, ai, wpn.type, memory, rng, aggressive, skill, actualWeights);
+    const target = chooseTarget(w, know, ai, wpn.type, memory, rng, aggressive, skill, actualWeights, ctx);
     if (!target) continue; // no worthwhile target for this weapon; try the next
     if (apply({ type: 'fire', buildingId: wpn.id, x: target.x, y: target.y, rot: target.rot })) {
       // learn from our own shots (hit/miss/destroyed) — legitimate intel, no fog cheat
@@ -402,6 +483,7 @@ function bestScanAnchor(
   memory: AiMemory,
   size: number,
   weights: AiWeights = DEFAULT_AI_WEIGHTS,
+  ctx?: TargetCtx,
 ): Vec | null {
   const know = serializeForPlayer(s, ai);
   let best: Vec | null = null;
@@ -410,7 +492,7 @@ function bestScanAnchor(
     for (let x = 0; x <= s.map.width - size; x++) {
       let v = 0;
       for (let dy = 0; dy < size; dy++)
-        for (let dx = 0; dx < size; dx++) v += cellValue(s, know, ai, x + dx, y + dy, memory, weights);
+        for (let dx = 0; dx < size; dx++) v += cellValue(s, know, ai, x + dx, y + dy, memory, weights, ctx);
       if (v > bestV) {
         bestV = v;
         best = { x, y };
@@ -428,6 +510,7 @@ function cellValue(
   y: number,
   memory: AiMemory,
   weights: AiWeights = DEFAULT_AI_WEIGHTS,
+  ctx?: TargetCtx,
 ): number {
   const W = s.map.width;
   if (x < 0 || y < 0 || x >= W || y >= s.map.height) return 0;
@@ -449,7 +532,9 @@ function cellValue(
   const known = buildingAt(know, x, y);
   if (known && known.b.owner !== ai && !known.cell.destroyed && s.players[known.b.owner]?.alive) {
     if (known.b.type === 'base') return weights.knownBaseVal;
-    if (known.b.type === 'powerplant' || known.b.type === 'research' || known.b.type === 'nuclear') return weights.knownEcoVal;
+    if (known.b.type === 'nuclear') return weights.knownNukeVal; // detected nuke facility: top priority
+    if (known.b.type === 'research') return weights.knownResearchVal; // cripple their tech tree
+    if (known.b.type === 'powerplant') return weights.knownEcoVal;
     if (known.b.type === 'radar') return weights.knownRadarVal;
     return 60;
   }
@@ -470,6 +555,12 @@ function cellValue(
     const nb = buildingAt(know, nx, ny);
     if ((nb && nb.b.owner !== ai && !nb.cell.destroyed) || memory.hits.includes(ny * W + nx)) v += weights.adjacentHitBonus;
   }
+  // nuke-threat response: focus the builder's whole field + crater their open 3×2 sites
+  if (ctx) {
+    if (ctx.threats.has(terr)) v += weights.nukeThreatFocus;
+    const deny = ctx.denyMap.get(ci) || 0;
+    if (deny > 0) v += Math.min(deny, 4) * weights.nukeDenyVal;
+  }
   return v;
 }
 
@@ -484,6 +575,7 @@ function chooseTarget(
   aggressive: boolean,
   skill = 1,
   weights: AiWeights = DEFAULT_AI_WEIGHTS,
+  ctx?: TargetCtx,
 ): { x: number; y: number; rot?: 0 | 1 } | null {
   const def = buildingDef(type);
   const rawW = def.attackW ?? 1;
@@ -499,7 +591,7 @@ function chooseTarget(
         let knownHits = 0;
         for (let dy = 0; dy < 3; dy++)
           for (let dx = 0; dx < 3; dx++) {
-            const cv = cellValue(w, know, ai, x + dx, y + dy, memory, weights);
+            const cv = cellValue(w, know, ai, x + dx, y + dy, memory, weights, ctx);
             v += cv;
             if (cv >= 60) knownHits++;
           }
@@ -528,7 +620,7 @@ function chooseTarget(
         if (!canTargetAt(w, ai, x, y, aw, ah)) continue;
         let base = 0;
         for (let dy = 0; dy < ah; dy++)
-          for (let dx = 0; dx < aw; dx++) base += Math.max(0, cellValue(w, know, ai, x + dx, y + dy, memory, weights));
+          for (let dx = 0; dx < aw; dx++) base += Math.max(0, cellValue(w, know, ai, x + dx, y + dy, memory, weights, ctx));
         // never fire at worthless ground (neutral land, dead fields, known-empty cells).
         // Aim-noise (lower skill = sloppier) only scrambles the ranking among REAL candidates.
         if (base <= 0) continue;

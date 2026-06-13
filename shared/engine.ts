@@ -786,7 +786,17 @@ export function applyAction(stateIn: GameState, playerId: string, action: Action
         w: d2.w,
         h: d2.h,
       });
-      s.log.push({ turn: s.turn, player: pi, text: `${player.name} built a ${def.name}.`, kind: 'build' });
+      if (action.building === 'nuclear') {
+        // public early-warning — everyone (and every AI) sees a nuke is being constructed (not where)
+        s.log.push({
+          turn: s.turn,
+          player: pi,
+          text: `☢ ALERT: ${player.name} is constructing a NUCLEAR FACILITY!`,
+          kind: 'threat',
+        });
+      } else {
+        s.log.push({ turn: s.turn, player: pi, text: `${player.name} built a ${def.name}.`, kind: 'build' });
+      }
       return { ok: true, state: s, events };
     }
 

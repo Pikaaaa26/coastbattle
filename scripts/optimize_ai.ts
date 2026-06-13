@@ -4,14 +4,18 @@ import { fileURLToPath } from 'url';
 import { generateMap } from '../shared/map';
 import { createGame, applyAction, incomePreview } from '../shared/engine';
 import { decideDeploy, decideTurn, newAiMemory, DEFAULT_AI_WEIGHTS, type AiWeights } from '../shared/ai';
+import CURRENT_WEIGHTS from '../shared/optimized_weights.json';
 import type { GameSettings, GameState, MapArchetype } from '../shared/types';
 import { TURN_CAP } from '../shared/constants';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const POPULATION_SIZE = 40;
-const GENERATIONS = 45;
+// seed the run from the weights we already have (fill any missing keys from defaults)
+const SEED_WEIGHTS: AiWeights = { ...DEFAULT_AI_WEIGHTS, ...(CURRENT_WEIGHTS as Partial<AiWeights>) };
+
+const POPULATION_SIZE = Number(process.env.POP) || 40;
+const GENERATIONS = Number(process.env.GEN) || 100;
 const GAMES_PER_EVAL = 6;
 const MUTATION_RATE = 0.3;
 const CROSSOVER_RATE = 0.7;
@@ -53,8 +57,19 @@ function simulateMatch(
   // Play phase
   const mem = [newAiMemory(), newAiMemory(), newAiMemory()];
   const fitnessScores = [0, 0, 0];
+  const wasBaseless = [false, false, false];
   let safety = 0;
   while (state.phase === 'playing' && safety++ < 3000) {
+    // resilience: reward any commander who LOST their base (e.g. nuked) and then REBUILT it
+    for (let p = 0; p < 3; p++) {
+      if (!state.players[p].alive) continue;
+      const hasBase = state.buildings.some((b) => b.owner === p && b.type === 'base' && !b.destroyed);
+      if (!hasBase) wasBaseless[p] = true;
+      else if (wasBaseless[p]) {
+        fitnessScores[p] += 150;
+        wasBaseless[p] = false;
+      }
+    }
     const ai = state.currentPlayer;
     
     // 1. Calculate and record turn-start/income/hoarding fitness metrics
@@ -176,6 +191,12 @@ function mutateChromosome(c: AiWeights): AiWeights {
     knownRadarVal: randomJitter(c.knownRadarVal, 30, 10, 200),
     energyReserve: randomJitter(c.energyReserve, 4, 0, 20),
 
+    nukeThreatFocus: randomJitter(c.nukeThreatFocus, 10, 0, 60),
+    knownNukeVal: randomJitter(c.knownNukeVal, 40, 50, 320),
+    knownResearchVal: randomJitter(c.knownResearchVal, 40, 20, 260),
+    nukeReserveBonus: randomJitter(c.nukeReserveBonus, 4, 0, 20),
+    nukeDenyVal: randomJitter(c.nukeDenyVal, 8, 0, 40),
+
     wBase_economy: floatJitter(c.wBase_economy, 5, -50, 50),
     wEnergy_economy: floatJitter(c.wEnergy_economy, 0.4, -5, 5),
     wEnergyGen_economy: floatJitter(c.wEnergyGen_economy, 0.4, -5, 5),
@@ -221,6 +242,12 @@ function crossover(p1: AiWeights, p2: AiWeights): AiWeights {
     knownRadarVal: blend(p1.knownRadarVal, p2.knownRadarVal),
     energyReserve: blend(p1.energyReserve, p2.energyReserve),
 
+    nukeThreatFocus: blend(p1.nukeThreatFocus, p2.nukeThreatFocus),
+    knownNukeVal: blend(p1.knownNukeVal, p2.knownNukeVal),
+    knownResearchVal: blend(p1.knownResearchVal, p2.knownResearchVal),
+    nukeReserveBonus: blend(p1.nukeReserveBonus, p2.nukeReserveBonus),
+    nukeDenyVal: blend(p1.nukeDenyVal, p2.nukeDenyVal),
+
     wBase_economy: blendFloat(p1.wBase_economy, p2.wBase_economy),
     wEnergy_economy: blendFloat(p1.wEnergy_economy, p2.wEnergy_economy),
     wEnergyGen_economy: blendFloat(p1.wEnergyGen_economy, p2.wEnergyGen_economy),
@@ -253,26 +280,26 @@ function runOptimization() {
   // Maintain co-evolution history
   const historyBestWeights: AiWeights[] = [];
 
-  // Initialize population
+  // Initialize population from the CURRENT trained weights (keep one elite clone + mutated variants)
   let population: AiWeights[] = [];
-  population.push({ ...DEFAULT_AI_WEIGHTS });
+  population.push({ ...SEED_WEIGHTS });
   for (let i = 1; i < POPULATION_SIZE; i++) {
-    population.push(mutateChromosome(DEFAULT_AI_WEIGHTS));
+    population.push(mutateChromosome(SEED_WEIGHTS));
   }
 
-  let bestChromosome: AiWeights = { ...DEFAULT_AI_WEIGHTS };
+  let bestChromosome: AiWeights = { ...SEED_WEIGHTS };
   let bestFitness = -Infinity;
   let bestWinRate = 0.0;
 
   for (let gen = 0; gen < GENERATIONS; gen++) {
-    // Determine opponent weights (2 generations below, or default if G < 2)
-    const opponentWeights = gen >= 2 ? historyBestWeights[gen - 2] : DEFAULT_AI_WEIGHTS;
+    // Determine opponent weights (2 generations below, or the CURRENT trained AI if G < 2)
+    const opponentWeights = gen >= 2 ? historyBestWeights[gen - 2] : SEED_WEIGHTS;
     
     console.log(`\nEvaluating Generation ${gen + 1}/${GENERATIONS}...`);
     if (gen >= 2) {
       console.log(`Opponent AI Level: Evolved weights from Gen ${gen - 1}`);
     } else {
-      console.log(`Opponent AI Level: Baseline DEFAULT_AI_WEIGHTS`);
+      console.log(`Opponent AI Level: current trained (seed) weights`);
     }
     
     // Evaluate population

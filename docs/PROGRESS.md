@@ -236,6 +236,34 @@ adversarial blocker verification). Result: ONE true deploy blocker, fixed; onlin
   (renderer.adjustZoom/rotateCamera/resetCamera already exist; wire them to touch + buttons).
 - Persistence: ratings/battle_logs reset on free-tier redeploy (use paid plan + disk + DATA_DIR).
 
+### P14 — Mobile controls + nuclear-threat AI + ML run (2026-06-13)
+**Mobile controls (GameScreen.tsx + renderer + game.css):**
+- ✅ Fixed mobile place/fire: confirm moved OFF the sidebar into floating ✓/✕ buttons pinned over the
+  building ghost (renderer.cellToScreen projects the cell each frame; ✓ commits the STORED hover cell).
+- ✅ Multi-touch: 1 finger = aim (set hover), 2 fingers = pan + pinch-zoom, 3 fingers = rotate
+  (renderer.rotateCameraBy). `touch-action:none` already on the canvas. Help text updated.
+
+**Nuclear-threat system:**
+- ✅ Engine: building a Nuclear Facility now emits a PUBLIC battle-log alert (kind 'threat', pulsing red
+  CSS) — "☢ ALERT: <name> is constructing a NUCLEAR FACILITY!". Log isn't fog-filtered, so all players
+  + every AI (runs on full state) see WHO is building one (not where).
+- ✅ AI reaction (shared/ai.ts): `nukeThreatSet` reads the log alert; under threat the AI (a) focuses
+  fire on the builder's whole field (`nukeThreatFocus`), (b) max-priorities a DETECTED enemy nuclear
+  facility / research station (`knownNukeVal`/`knownResearchVal`, split out of knownEcoVal), (c) banks
+  energy = baseCost+`nukeReserveBonus` so it can instantly rebuild after being nuked, (d) craters the
+  builder's open 3×2/2×3 sites (`computeDenyMap` + `nukeDenyVal`) to deny nuke (re)build spots. 5 new
+  tunable weights; threat-free play is byte-identical to before (ctx only applied when threats exist).
+  `OPTIMIZED_WEIGHTS` now merges over DEFAULT so a partial weights file can't NaN.
+- ✅ ML: optimizer (scripts/optimize_ai.ts) now seeds the population from the CURRENT trained weights
+  (not DEFAULT), co-evolves the new params (mutate/crossover ranges added), rewards base-rebuild
+  resilience (+150 for losing-then-rebuilding a base), GEN/POP via env. **Running GEN=100 in the
+  background → optimize.log; checkpoints best to shared/optimized_weights.json each improving gen.**
+  Stop anytime with the process; latest checkpoint is always the saved best.
+- ✅ Verified: tsc clean, engine selftest 0 invalid AI actions, build clean, optimizer smoke + live run
+  (Gen3 fitness 2747, win-rate vs seed 50→67%).
+- NOTE: P14 changes are UNCOMMITTED (last push = deploy prep). Commit after the ML run settles (it keeps
+  rewriting optimized_weights.json).
+
 ### Possible future polish (not blocking review)
 - Catch-screenshot of artillery/nuke explosion + radar reveal (effect funcs confirmed via splash + a
   full completed game). Chat UI in online. Spectator. Replays. Difficulty tuning.

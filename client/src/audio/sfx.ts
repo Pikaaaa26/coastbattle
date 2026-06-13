@@ -154,7 +154,7 @@ class SfxEngine {
     // slow, brooding naval arpeggio + drone
     const ctx = this.ctx;
     const bus = ctx.createGain();
-    bus.gain.value = 0.12;
+    bus.gain.value = 0.18; // background-music master volume (drone + arpeggio feed this bus)
     bus.connect(this.master);
     const drone = ctx.createOscillator();
     drone.type = 'sine';

@@ -120,31 +120,23 @@ export default function GameScreen() {
     });
   }, [tool, hover, validCells, viewer]);
 
-  // Mobile: pick initial recommended position when tool activates
+  // Mobile: pick a recommended position when the tool activates — but keep the spot the
+  // player is already aiming at if it's still valid, so rotating (or an economy change)
+  // rotates the ghost in place instead of yanking it (and the floating buttons) to a new cell.
   useEffect(() => {
-    if (isMobile && tool.mode !== 'idle') {
-      let recommended: Vec | null = null;
-      if (tool.mode === 'fire' || tool.mode === 'sonar') {
-        if (validCells && validCells.size > 0) {
-          const firstCellIdx = Array.from(validCells)[0];
-          const W = view?.map.width ?? 20;
-          recommended = { x: firstCellIdx % W, y: Math.floor(firstCellIdx / W) };
-        } else {
-          const W = view?.map.width ?? 20;
-          const H = view?.map.height ?? 20;
-          recommended = { x: Math.floor(W * 0.7), y: Math.floor(H / 2) };
-        }
-      } else {
-        if (validCells && validCells.size > 0) {
-          const firstCellIdx = Array.from(validCells)[0];
-          const W = view?.map.width ?? 20;
-          recommended = { x: firstCellIdx % W, y: Math.floor(firstCellIdx / W) };
-        }
-      }
-      if (recommended) {
-        setHover(recommended);
-      }
+    if (!isMobile || tool.mode === 'idle') return;
+    const W = view?.map.width ?? 20;
+    const cur = useGame.getState().hover;
+    if (cur && validCells && validCells.size > 0 && validCells.has(cur.y * W + cur.x)) return;
+    let recommended: Vec | null = null;
+    if (validCells && validCells.size > 0) {
+      const firstCellIdx = Array.from(validCells)[0];
+      recommended = { x: firstCellIdx % W, y: Math.floor(firstCellIdx / W) };
+    } else if (tool.mode === 'fire' || tool.mode === 'sonar') {
+      const H = view?.map.height ?? 20;
+      recommended = { x: Math.floor(W * 0.7), y: Math.floor(H / 2) };
     }
+    if (recommended) setHover(recommended);
   }, [tool.mode, tool.buildingType, tool.buildingId, tool.rot, validCells, isMobile, view, setHover]);
 
   // keyboard: R/Space rotate the current build/aim, Q/E rotate the camera, Esc cancels
@@ -228,6 +220,9 @@ export default function GameScreen() {
   const income = incomePreview(view, viewer);
 
   const panRef = useRef<{ x: number; y: number; moved: number; btn: number } | null>(null);
+  // multi-touch gesture state: 1 finger = aim, 2 = pan + pinch-zoom, 3 = rotate
+  const gestureRef = useRef<{ mode: 'tap' | 'two' | 'three'; cx: number; cy: number; dist: number; moved: number } | null>(null);
+  const floatRef = useRef<HTMLDivElement>(null);
   const onCanvasMove = (e: React.MouseEvent) => {
     if (panRef.current) {
       const dx = e.clientX - panRef.current.x;
@@ -273,71 +268,155 @@ export default function GameScreen() {
     const el = document.querySelector(selector);
     if (!el) return false;
     const rect = el.getBoundingClientRect();
-    return (
-      clientX >= rect.left &&
-      clientX <= rect.right &&
-      clientY >= rect.top &&
-      clientY <= rect.bottom
-    );
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  };
+  const overUI = (x: number, y: number) =>
+    isOverElement(x, y, '.hud') ||
+    isOverElement(x, y, '.canvas-log-overlay') ||
+    isOverElement(x, y, '.topnav') ||
+    isOverElement(x, y, '.floating-confirm');
+  const touchInfo = (touches: React.TouchList) => {
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < touches.length; i++) {
+      cx += touches[i].clientX;
+      cy += touches[i].clientY;
+    }
+    cx /= touches.length;
+    cy /= touches.length;
+    const dist =
+      touches.length >= 2 ? Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY) : 0;
+    return { cx, cy, dist };
   };
 
   const onTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 1) {
-      const touch = e.touches[0];
-      panRef.current = { x: touch.clientX, y: touch.clientY, moved: 0, btn: 0 };
-    }
+    const n = e.touches.length;
+    const { cx, cy, dist } = touchInfo(e.touches);
+    gestureRef.current = { mode: n >= 3 ? 'three' : n === 2 ? 'two' : 'tap', cx, cy, dist, moved: 0 };
   };
 
   const onTouchMove = (e: React.TouchEvent) => {
-    if (panRef.current && e.touches.length === 1) {
-      const touch = e.touches[0];
-      const dx = touch.clientX - panRef.current.x;
-      const dy = touch.clientY - panRef.current.y;
-      panRef.current.x = touch.clientX;
-      panRef.current.y = touch.clientY;
-      panRef.current.moved += Math.abs(dx) + Math.abs(dy);
-      if (isMobile && tool.mode !== 'idle') {
-        if (
-          isOverElement(touch.clientX, touch.clientY, '.hud') ||
-          isOverElement(touch.clientX, touch.clientY, '.canvas-log-overlay') ||
-          isOverElement(touch.clientX, touch.clientY, '.topnav')
-        ) {
-          return;
-        }
-        const c = rendererRef.current?.cellAt(touch.clientX, touch.clientY);
-        if (c) {
-          setHover(c);
-        }
-      } else {
-        rendererRef.current?.pan(dx, dy);
+    const g = gestureRef.current;
+    if (!g) return;
+    const n = e.touches.length;
+    const { cx, cy, dist } = touchInfo(e.touches);
+    const dx = cx - g.cx;
+    const dy = cy - g.cy;
+    g.moved += Math.abs(dx) + Math.abs(dy);
+    if (g.mode === 'tap' && n === 1) {
+      // 1 finger = aim: slide the building/target ghost to the touched cell (never over UI)
+      const t = e.touches[0];
+      if (tool.mode !== 'idle' && !overUI(t.clientX, t.clientY)) {
+        const c = rendererRef.current?.cellAt(t.clientX, t.clientY);
+        if (c) setHover(c);
       }
+    } else if (g.mode === 'two' && n >= 2) {
+      rendererRef.current?.pan(dx, dy); // two-finger drag = pan
+      if (g.dist > 0 && dist > 0) rendererRef.current?.adjustZoom(dist / g.dist); // pinch = zoom
+    } else if (g.mode === 'three' && n >= 3) {
+      rendererRef.current?.rotateCameraBy(-dx * 0.012); // three-finger horizontal = rotate
     }
+    g.cx = cx;
+    g.cy = cy;
+    g.dist = dist;
   };
 
   const onTouchEnd = (e: React.TouchEvent) => {
-    if (panRef.current) {
-      const wasDrag = panRef.current.moved > 10;
-      panRef.current = null;
-      if (!wasDrag && e.changedTouches.length === 1) {
-        const touch = e.changedTouches[0];
-        if (
-          isOverElement(touch.clientX, touch.clientY, '.hud') ||
-          isOverElement(touch.clientX, touch.clientY, '.canvas-log-overlay') ||
-          isOverElement(touch.clientX, touch.clientY, '.topnav')
-        ) {
-          return;
-        }
-        const c = rendererRef.current?.cellAt(touch.clientX, touch.clientY);
+    const g = gestureRef.current;
+    if (g && g.mode === 'tap' && g.moved < 12 && e.changedTouches.length >= 1) {
+      const t = e.changedTouches[0];
+      if (!overUI(t.clientX, t.clientY)) {
+        const c = rendererRef.current?.cellAt(t.clientX, t.clientY);
         if (c) {
-          if (isMobile && tool.mode !== 'idle') {
-            setHover(c);
-          } else {
-            click(c);
-          }
+          // mobile: a tap only AIMS (the floating ✓ commits); desktop touch / idle acts immediately
+          if (isMobile && tool.mode !== 'idle') setHover(c);
+          else click(c);
         }
       }
     }
+    if (e.touches.length === 0) {
+      gestureRef.current = null;
+    } else {
+      // some fingers lifted — re-baseline so the remaining gesture doesn't jump
+      const n = e.touches.length;
+      const { cx, cy, dist } = touchInfo(e.touches);
+      gestureRef.current = { mode: n >= 3 ? 'three' : n === 2 ? 'two' : 'tap', cx, cy, dist, moved: 999 };
+    }
   };
+
+  // keep the floating confirm/cancel buttons pinned over the building ghost (mobile only)
+  useEffect(() => {
+    if (!isMobile) return;
+    let raf = 0;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const el = floatRef.current;
+      const r = rendererRef.current;
+      if (!el || !r) return;
+      const st = useGame.getState();
+      const t = st.tool;
+      const h = st.hover;
+      if (!st.controllable() || t.mode === 'idle' || !h) {
+        el.style.display = 'none';
+        return;
+      }
+      let fw = 1;
+      let fh = 1;
+      if (t.mode === 'build' || t.mode === 'placeBase') {
+        const def = BUILDINGS[t.mode === 'placeBase' ? 'base' : t.buildingType || 'silo'];
+        fw = t.rot ? def.h : def.w;
+        fh = t.rot ? def.w : def.h;
+      } else {
+        fw = t.attackW || 1;
+        fh = t.attackH || 1;
+      }
+      const pos = r.cellToScreen(h.x + (fw - 1) / 2, h.y + (fh - 1) / 2);
+      if (!pos) {
+        el.style.display = 'none';
+        return;
+      }
+      el.style.display = 'flex';
+      el.style.left = `${pos.x}px`;
+      el.style.top = `${pos.y}px`;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isMobile]);
+
+  // mobile ✓: commit the aimed action directly from fresh store state (robust, no synthetic-click reliance)
+  const mobileConfirm = () => {
+    const st = useGame.getState();
+    const h = st.hover;
+    const t = st.tool;
+    const sess = st.session;
+    if (!sess || !h || t.mode === 'idle' || !st.controllable()) return;
+    if (t.mode === 'placeBase') {
+      sfx.place();
+      sess.submit({ type: 'placeBase', x: h.x, y: h.y });
+      useGame.setState({ tool: { mode: 'idle' }, validCells: new Set() });
+    } else if (t.mode === 'build' && t.buildingType) {
+      sfx.place();
+      sess.submit({ type: 'build', building: t.buildingType, x: h.x, y: h.y, rot: t.rot ?? 0 });
+    } else if (t.mode === 'sonar' && t.buildingId) {
+      sfx.radar();
+      sess.submit({ type: 'sonar', buildingId: t.buildingId, x: h.x, y: h.y });
+      useGame.setState({ tool: { mode: 'idle' }, validCells: new Set() });
+    } else if (t.mode === 'fire' && t.buildingId) {
+      if (!st.view || !st.validCells.has(h.y * st.view.map.width + h.x)) {
+        st.flashError('Cannot target your own territory');
+        return;
+      }
+      sfx.launch();
+      sess.submit({ type: 'fire', buildingId: t.buildingId, x: h.x, y: h.y, rot: t.rot ?? 0 });
+      useGame.setState({ tool: { mode: 'idle' }, validCells: new Set() });
+    }
+  };
+  const confirmLabel =
+    tool.mode === 'placeBase' ? 'DEPLOY' : tool.mode === 'build' ? 'BUILD' : tool.mode === 'sonar' ? 'SCAN' : 'FIRE';
+  // a rotate button is only useful when the footprint is non-square (e.g. napalm 3×1, 2×1 builds)
+  const rotatable =
+    (tool.mode === 'build' && !!tool.buildingType && BUILDINGS[tool.buildingType].w !== BUILDINGS[tool.buildingType].h) ||
+    ((tool.mode === 'fire' || tool.mode === 'sonar') && (tool.attackW ?? 1) !== (tool.attackH ?? 1));
 
   function leave() {
     sfx.click();
@@ -428,6 +507,80 @@ export default function GameScreen() {
             }}
             onContextMenu={(e) => e.preventDefault()}
           />
+          {isMobile && (
+            <div ref={floatRef} className="floating-confirm" style={{ display: 'none' }}>
+              <button
+                className="fc-btn fc-yes"
+                type="button"
+                aria-label={confirmLabel}
+                title={confirmLabel}
+                onPointerUp={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  mobileConfirm();
+                }}
+                onTouchEnd={(e) => e.stopPropagation()}
+              >
+                <svg className="fc-ico" viewBox="0 0 16 16" shapeRendering="crispEdges" aria-hidden="true">
+                  <path
+                    d="M2 8 L6 12 L14 3"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="square"
+                    strokeLinejoin="miter"
+                  />
+                </svg>
+              </button>
+              {rotatable && (
+                <button
+                  className="fc-btn fc-rot"
+                  type="button"
+                  aria-label="Rotate"
+                  onPointerUp={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sfx.click();
+                    useGame.getState().rotateTool();
+                  }}
+                  onTouchEnd={(e) => e.stopPropagation()}
+                >
+                  <svg className="fc-ico" viewBox="0 0 16 16" shapeRendering="crispEdges" aria-hidden="true">
+                    <path
+                      d="M8 3 A5 5 0 1 1 3 8"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      strokeLinecap="square"
+                    />
+                    <path d="M8 1 L8 5 L12 3 Z" fill="currentColor" stroke="none" />
+                  </svg>
+                </button>
+              )}
+              <button
+                className="fc-btn fc-no"
+                type="button"
+                aria-label="Cancel"
+                onPointerUp={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  sfx.click();
+                  clearTool();
+                }}
+                onTouchEnd={(e) => e.stopPropagation()}
+              >
+                <svg className="fc-ico" viewBox="0 0 16 16" shapeRendering="crispEdges" aria-hidden="true">
+                  <path
+                    d="M3 3 L13 13 M13 3 L3 13"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="square"
+                  />
+                </svg>
+              </button>
+            </div>
+          )}
           {/* Battle Log Overlay Trigger & Preview */}
           <div
             className="canvas-log-overlay"
@@ -798,21 +951,9 @@ function Hud({
       </div>
 
       <div className="hud-actions">
-        {isMobile && tool.mode !== 'idle' && hover && (
-          <button
-            className="btn btn-primary btn-confirm-action"
-            onClick={() => {
-              sfx.click();
-              if (hover) click(hover);
-            }}
-            style={{ border: '2px solid var(--green)', background: '#113525', textShadow: '0 0 6px var(--green)' }}
-          >
-            Confirm ✓
-          </button>
-        )}
         {rotatable && (
-          <button className="btn btn-sm" title="Rotate (R)" onClick={rotateTool}>
-            ⟳ R
+          <button className="btn btn-sm" title={isMobile ? 'Rotate' : 'Rotate (Space)'} onClick={rotateTool}>
+            ⟳ Rotate{isMobile ? '' : ' (Space)'}
           </button>
         )}
         {tool.mode === 'fire' || tool.mode === 'sonar' ? (
@@ -998,6 +1139,10 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
           <li>
             <span className="amber">Q / E</span> rotate the camera · <span className="amber">wheel</span> zooms ·{' '}
             <span className="amber">right-drag</span> pans.
+          </li>
+          <li>
+            <span className="amber">Mobile:</span> tap to aim, then ✓ to place/fire · two-finger drag pans ·
+            pinch zooms · three-finger drag rotates.
           </li>
           <li>
             <span className="amber">Right-click</span> (without dragging) cancels the current tool.
